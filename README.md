@@ -41,7 +41,7 @@ It shows how data flows through a system:
 ---
 
 ## 📂 Project Structure
-
+```text
 inventory-management/
 ├── main.py # Application entry point
 ├── database.py # Database setup and table definitions
@@ -54,6 +54,7 @@ inventory-management/
 │   ├── AppFinal4.png
 │   └── AppFinal5.png
 └── README.md 
+```
 ---
 
 ## ✅ Features That Are Working
