@@ -168,11 +168,11 @@ The application will automatically:
 
 ## 📸 Screenshots
 
-![screenshot1](Screenshots/AppFinal1.png)
-![screenshot2](Screenshots/AppFinal2.png)
-![screenshot3](Screenshots/AppFinal3.png)
-![screenshot4](Screenshots/AppFinal4.png)
-![screenshot5](Screenshots/AppFinal5.png)
+![screenshot1](screenshots/AppFinal1.png)
+![screenshot2](screenshots/AppFinal2.png)
+![screenshot3](screenshots/AppFinal3.png)
+![screenshot4](screenshots/AppFinal4.png)
+![screenshot5](screenshots/AppFinal5.png)
 
 ---
 
