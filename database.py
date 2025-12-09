@@ -25,7 +25,9 @@ class Database:
                 category TEXT,
                 unit_of_measure TEXT,
                 unit_price REAL,
-                selling_price REAL
+                selling_price REAL,
+                hsn_code TEXT,
+                gst_rate REAL DEFAULT 18.0
             )
         ''')
         
@@ -41,6 +43,20 @@ class Database:
             )
         ''')
         
+        # Settings table for dark mode and other preferences
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS Settings (
+                setting_key TEXT PRIMARY KEY,
+                setting_value TEXT
+            )
+        ''')
+        
+        # Set default dark mode to off if not exists
+        self.cursor.execute('''
+            INSERT OR IGNORE INTO Settings (setting_key, setting_value) 
+            VALUES ('dark_mode', 'off')
+        ''')
+        
         # PURCHASE DEPARTMENT TABLES
         
         # Suppliers table
@@ -52,7 +68,8 @@ class Database:
                 phone TEXT,
                 email TEXT,
                 address TEXT,
-                payment_terms TEXT
+                payment_terms TEXT,
+                gstin TEXT
             )
         ''')
         
@@ -64,6 +81,8 @@ class Database:
                 order_date DATE,
                 expected_delivery DATE,
                 status TEXT DEFAULT 'Pending',
+                subtotal REAL,
+                gst_amount REAL,
                 total_amount REAL,
                 FOREIGN KEY (supplier_id) REFERENCES Suppliers(supplier_id)
             )
@@ -77,6 +96,8 @@ class Database:
                 item_id INTEGER,
                 quantity INTEGER,
                 unit_price REAL,
+                gst_rate REAL,
+                gst_amount REAL,
                 subtotal REAL,
                 FOREIGN KEY (po_number) REFERENCES Purchase_Orders(po_number),
                 FOREIGN KEY (item_id) REFERENCES Items(item_id)
@@ -114,7 +135,8 @@ class Database:
                 email TEXT,
                 address TEXT,
                 credit_limit REAL,
-                payment_terms TEXT
+                payment_terms TEXT,
+                gstin TEXT
             )
         ''')
         
@@ -126,6 +148,8 @@ class Database:
                 order_date DATE,
                 delivery_date DATE,
                 status TEXT DEFAULT 'Pending',
+                subtotal REAL,
+                gst_amount REAL,
                 total_amount REAL,
                 FOREIGN KEY (customer_id) REFERENCES Customers(customer_id)
             )
@@ -139,6 +163,8 @@ class Database:
                 item_id INTEGER,
                 quantity INTEGER,
                 unit_price REAL,
+                gst_rate REAL,
+                gst_amount REAL,
                 subtotal REAL,
                 FOREIGN KEY (so_number) REFERENCES Sales_Orders(so_number),
                 FOREIGN KEY (item_id) REFERENCES Items(item_id)
@@ -153,6 +179,8 @@ class Database:
                 customer_id INTEGER,
                 invoice_date DATE,
                 due_date DATE,
+                subtotal REAL,
+                gst_amount REAL,
                 total_amount REAL,
                 status TEXT DEFAULT 'Unpaid',
                 FOREIGN KEY (so_number) REFERENCES Sales_Orders(so_number),
@@ -181,6 +209,20 @@ class Database:
     def lastrowid(self):
         """Get last inserted row ID"""
         return self.cursor.lastrowid
+    
+    def get_setting(self, key):
+        """Get a setting value"""
+        self.execute("SELECT setting_value FROM Settings WHERE setting_key = ?", (key,))
+        result = self.fetchone()
+        return result[0] if result else None
+    
+    def set_setting(self, key, value):
+        """Set a setting value"""
+        self.execute(
+            "INSERT OR REPLACE INTO Settings (setting_key, setting_value) VALUES (?, ?)",
+            (key, value)
+        )
+        self.commit()
     
     def close(self):
         """Close database connection"""
