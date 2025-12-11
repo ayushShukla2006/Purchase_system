@@ -42,9 +42,9 @@ class PurchaseModule:
         ttk.Button(top_btn_frame, text="✏️ Edit", command=self.edit_item).pack(side='left', padx=3)
         ttk.Button(top_btn_frame, text="🗑️ Delete", command=self.delete_item).pack(side='left', padx=3)
         ttk.Button(top_btn_frame, text="🔄 Refresh", command=self.refresh_inventory).pack(side='right', padx=3)
-        columns = ("ID", "Name", "Category", "Qty", "Reorder", "Buy Rate", "GST%", "Buy Price", "Sell Rate", "GST%", "Sell Price", "Status")
+        columns = ("ID", "Name", "Category", "Qty", "Reorder", "Buy Rate", "Buy GST%", "Buy Price", "Sell Rate", "Sell GST%", "Sell Price", "Status")
         self.inv_tree = ttk.Treeview(inv_frame, columns=columns, show='headings', height=25)
-        widths = [40, 120, 80, 50, 60, 70, 50, 80, 70, 50, 80, 60]
+        widths = [40, 140, 100, 60, 70, 90, 70, 100, 90, 70, 100, 70]
         for i, col in enumerate(columns):
             self.inv_tree.heading(col, text=col)
             self.inv_tree.column(col, width=widths[i])
@@ -60,7 +60,7 @@ class PurchaseModule:
         self.db.execute('''SELECT i.item_id, i.name, i.category, inv.quantity_on_hand, inv.reorder_level,
             i.purchase_rate, i.purchase_gst_percent, i.purchase_price, 
             i.selling_rate, i.selling_gst_percent, i.selling_price
-            FROM Items i JOIN Inventory inv ON i.item_id = inv.item_id ORDER BY i.name''')
+            FROM Items i JOIN Inventory inv ON i.item_id = inv.item_id ORDER BY i.item_id''')
         for row in self.db.fetchall():
             status = "LOW" if row[3] <= row[4] else "OK"
             tag = 'low' if status == "LOW" else ''
@@ -357,7 +357,7 @@ class PurchaseModule:
         self.db.execute('''SELECT po.po_number, s.name, po.order_date, po.expected_delivery, po.status, 
             po.subtotal, po.total_gst, po.total_amount,
             (SELECT COUNT(*) FROM Purchase_Order_Items WHERE po_number = po.po_number) as item_count
-            FROM Purchase_Orders po JOIN Suppliers s ON po.supplier_id = s.supplier_id ORDER BY po.po_number DESC''')
+            FROM Purchase_Orders po JOIN Suppliers s ON po.supplier_id = s.supplier_id ORDER BY po.po_number''')
         for row in self.db.fetchall():
             display_row = (row[0], row[1], row[2], row[3], row[4], 
                           f"₹{row[5]:.2f}", f"₹{row[6]:.2f}", f"₹{row[7]:.2f}", row[8])
@@ -767,7 +767,7 @@ class PurchaseModule:
                 FROM Goods_Receipt gr
                 JOIN Suppliers s ON gr.supplier_id = s.supplier_id
             GROUP BY gr.invoice_number, gr.po_number, gr.receipt_date
-            ORDER BY MIN(gr.receipt_id) DESC
+            ORDER BY MIN(gr.receipt_id) 
         ''')
     
         for row in self.db.fetchall():

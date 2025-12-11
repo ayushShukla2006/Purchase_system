@@ -201,7 +201,7 @@ class SalesModule:
         self.db.execute('''SELECT so.so_number, c.name, so.order_date, so.delivery_date, so.status, 
             so.subtotal, so.total_gst, so.total_amount,
             (SELECT COUNT(*) FROM Sales_Order_Items WHERE so_number = so.so_number) as item_count
-            FROM Sales_Orders so JOIN Customers c ON so.customer_id = c.customer_id ORDER BY so.so_number DESC''')
+            FROM Sales_Orders so JOIN Customers c ON so.customer_id = c.customer_id ORDER BY so.so_number''')
         for row in self.db.fetchall():
             display_row = (row[0], row[1], row[2], row[3], row[4], 
                           f"₹{row[5]:.2f}", f"₹{row[6]:.2f}", f"₹{row[7]:.2f}", row[8])
@@ -380,8 +380,6 @@ class SalesModule:
         btn_frame.grid(row=6, column=0, columnspan=4, pady=20)
         ttk.Button(btn_frame, text="✅ Create Sales Order", command=save_so, width=30).pack()
     
-    # [CONTINUED IN PART 2 - View, Delete, Invoice functions]
-
     def delete_sales_order(self):
         selected = self.so_tree.selection()
         if not selected:
