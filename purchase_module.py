@@ -954,7 +954,7 @@ class PurchaseModule:
                 po_combo['state'] = 'disabled'
                 return
                 
-            po.clear()
+            po_dict.clear()
             po_list = [f"PO #{po[0]} - {po[1]} ({po[2]})" for po in pos]
             for i, po in enumerate(pos):
                 po_dict[po_list[i]] = po[0]
