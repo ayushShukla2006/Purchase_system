@@ -794,7 +794,7 @@ class PurchaseModule:
                 s.name, 
                 gr.invoice_number,
                 COUNT(DISTINCT gr.item_id) as item_count,
-                SUM(gr.received_quantity) as total_received,
+                SUM(gr.accepted_quantity) as total_received,
                 SUM(gr.accepted_quantity) as total_accepted,
                 gr.receipt_date
                 FROM Goods_Receipt gr
@@ -1135,7 +1135,27 @@ class PurchaseModule:
                             SET quantity_on_hand = quantity_on_hand + ?, last_updated=?
                             WHERE item_id=?
                         """, (diff, datetime.now(), item_id))
-
+            
+                # Check if all items in the PO have been fully received
+                    self.db.execute('''
+                    SELECT COUNT(*) FROM Purchase_Order_Items poi
+                    WHERE poi.po_number = ?
+                    AND poi.quantity > (
+                        SELECT COALESCE(SUM(gr.accepted_quantity), 0)
+                        FROM Goods_Receipt gr
+                        WHERE gr.po_number = poi.po_number 
+                        AND gr.item_id = poi.item_id
+                    )
+                ''', (po_number,))
+        
+                unreceived_items = self.db.fetchone()[0]
+        
+                # Update PO status based on receipt completion
+                if unreceived_items == 0:
+                    self.db.execute('UPDATE Purchase_Orders SET status = "Completed" WHERE po_number = ?', (po_number,))
+                else:
+                    self.db.execute('UPDATE Purchase_Orders SET status = "Partially Received" WHERE po_number = ?', (po_number,))
+            
                 self.db.commit()
                 messagebox.showinfo("Success", f"Receipt updated successfully!\n{len(updates)} item(s) updated.")
                 dialog.destroy()
@@ -1487,7 +1507,7 @@ class PurchaseModule:
                     SELECT COUNT(*) FROM Purchase_Order_Items poi
                     WHERE poi.po_number = ?
                     AND poi.quantity > (
-                        SELECT COALESCE(SUM(gr.received_quantity), 0)
+                        SELECT COALESCE(SUM(gr.accepted_quantity), 0)
                         FROM Goods_Receipt gr
                         WHERE gr.po_number = poi.po_number 
                         AND gr.item_id = poi.item_id
