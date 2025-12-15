@@ -1,6 +1,5 @@
 """
 Purchase Module with GST Support (India) - Multi-item orders
-Save as: purchase_module.py
 """
 
 import tkinter as tk

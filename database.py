@@ -1,6 +1,5 @@
 """
 Database Module - Updated with GST Support for India
-Save as: database.py
 """
 
 import sqlite3
