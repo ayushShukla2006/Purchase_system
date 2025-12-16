@@ -135,7 +135,7 @@ The application will initialize the database automatically and launch the GUI.
 
 ---
 
-##📸Screenshots
+## 📸Screenshots
 
 ![screenshot1](screenshots/APPFINAL1.png)
 ![screenshot2](screenshots/APPFINAL2.png)
