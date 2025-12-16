@@ -1,44 +1,49 @@
 # Inventory Management System with GST Support
+
 *A College Project – Integrated Purchase & Sales Management System for India*
 
 ---
 
 ## 📘 About the Project
 
-**Inventory Management System** is a desktop-based application built as a **college project** to demonstrate practical understanding of:
+**Inventory Management System** is a desktop-based application built as a **college project** to demonstrate practical understanding of how real businesses structure their data and workflows.
 
-- GUI development using Python Tkinter
-- Relational database design with SQLite
-- Real-world business workflows
-- Modular software architecture
-- Indian GST (Goods and Services Tax) compliance
+The focus of this project is not government portal automation, but **clean transactional accounting**:
 
-The application simulates how a small business manages its **inventory, purchases, sales, goods receipt, and billing** using a local database and a graphical interface with comprehensive GST support.
+* GUI development using Python Tkinter
+* Relational database design with SQLite
+* Real-world purchase & sales workflows
+* Modular software architecture
+* **GST-aware accounting design for India**
 
-This project is intended for **educational purposes**, not for production or commercial deployment.
+The system models how GST is **captured, stored, and summarized** inside a business before filing, rather than attempting to automate statutory filing itself.
+
+This project is intended strictly for **educational and architectural demonstration purposes**, not for production or commercial deployment.
 
 ---
 
 ## 🎯 What This Project Is For
 
-The main objective of this project is to model a **basic ERP-style system** where different departments interact with shared data:
+The objective of this project is to model a **mini ERP-style system** where different departments interact with shared, GST-aware data.
 
-- **Purchase Department** - Manages suppliers, purchase orders, and goods receipt
-- **Sales Department** - Handles customers, sales orders, and invoicing
-- **Inventory Control** - Tracks stock levels and alerts for low inventory
+* **Purchase Department** records purchases and captures *Input GST*
+* **Sales Department** records sales and captures *Output GST*
+* **Inventory Control** reflects only physically accepted stock
 
-It demonstrates how data flows through an integrated business system:
+The system demonstrates how value (and tax) flows through a business:
 
 **Items → Purchase Orders → Goods Receipt → Inventory → Sales Orders → Invoices → Reports**
+
+GST is treated as **data captured at the transaction level**, not as a value reconstructed later.
 
 ---
 
 ## 🛠 Technologies Used
 
-- **Python 3** - Core programming language
-- **Tkinter / ttk** - GUI framework for desktop interface
-- **SQLite3** - Embedded relational database
-- Modular architecture with separate Python modules for different business functions
+* **Python 3** – Core programming language
+* **Tkinter / ttk** – GUI framework for desktop interface
+* **SQLite3** – Embedded relational database
+* Modular architecture with separate Python modules for different business functions
 
 ---
 
@@ -61,206 +66,60 @@ inventory-management/
 
 ---
 
-## ✅ Features That Are Working
+## 🧾 GST Handling Philosophy (Important)
 
-### 📦 Inventory & Items Management
-- ✅ Add, edit, and delete inventory items with full validation
-- ✅ Separate **Purchase Rate** and **Selling Rate** with individual GST percentages
-- ✅ Automatic price calculation: `Final Price = Rate + (Rate × GST%)`
-- ✅ Real-time price preview while adding/editing items
-- ✅ HSN code support for GST compliance
-- ✅ Track quantity on hand with automatic updates
-- ✅ Reorder level alerts for low stock items (visual indicators)
-- ✅ Prevent deletion of items referenced in orders or receipts
+This system does **not** file GST returns.
 
-### 🏢 Supplier Management
-- ✅ Add, edit, view, and delete suppliers
-- ✅ GSTIN (GST Identification Number) tracking
-- ✅ Contact details and payment terms
-- ✅ Data integrity: Prevent deletion of suppliers with purchase orders
+Instead, it prepares **accurate, auditable GST data** that a business would use *before* filing:
 
-### 👥 Customer Management
-- ✅ Complete customer database with GSTIN support
-- ✅ Credit limit tracking
-- ✅ Contact information management
-- ✅ Payment terms configuration
-- ✅ Protected deletion (cannot delete customers with orders)
+* GST is stored **per item** at the time of purchase and sale
+* Purchase transactions generate **Input GST**
+* Sales transactions generate **Output GST**
+* Reports summarize GST amounts automatically
 
-### 🛒 Purchase Orders (Multi-Item Support)
-- ✅ **Create multi-item purchase orders** with multiple products
-- ✅ Item-wise GST calculation and display
-- ✅ Real-time order total calculation (Subtotal + GST = Total)
-- ✅ Purchase order status tracking:
-  - **Pending** - Order created, waiting for goods
-  - **Partially Received** - Some items received
-  - **Completed** - All items fully received
-- ✅ View detailed PO breakdown with GST amounts
-- ✅ **Toggle visibility** of completed orders (hide/show)
-- ✅ Prevent deletion of POs with goods receipts
+This mirrors how real accounting systems work internally. Actual filing (GSTR-1, GSTR-3B, portal submission, OTPs, validations) is intentionally **out of scope** for this project.
 
-### 📥 Goods Receipt (Advanced Multi-Item)
-- ✅ **Multi-item goods receipt** - Receive multiple items in one invoice
-- ✅ Track **Received**, **Accepted**, and **Rejected** quantities separately
-- ✅ **Inventory updates only with accepted quantity** (rejected items don't affect stock)
-- ✅ **Validation**: Received quantity cannot exceed ordered quantity
-- ✅ **Edit receipts** with smart validation:
-  - Double-click cells to edit
-  - Shows ordered quantity for reference (read-only)
-  - Auto-calculates rejected = received - accepted
-  - Real-time summary updates
-- ✅ Duplicate invoice prevention
-- ✅ Invoice number tracking with date stamps
-- ✅ Notes field for quality issues or remarks
-- ✅ Automatic PO status updates based on received quantities
+**Net GST Liability (Conceptual):**
 
-### 🛍️ Sales Orders (Multi-Item Support)
-- ✅ **Create multi-item sales orders** for customers
-- ✅ Item-wise GST calculation for selling prices
-- ✅ **Real-time stock validation** - Cannot sell more than available
-- ✅ Automatic inventory deduction after order creation
-- ✅ View detailed breakdown with GST amounts
-- ✅ Sales order status: Completed
-- ✅ Generate invoices directly from sales orders
+`GST Payable = Output GST – Input GST`
 
-### 📄 Invoices & Billing
-- ✅ Generate invoices from sales orders (one-click)
-- ✅ Prevent duplicate invoice creation
-- ✅ Track invoice status: **Paid** / **Unpaid**
-- ✅ Visual indicators (red for unpaid, green for paid)
-- ✅ Due date tracking (default 30 days)
-- ✅ Mark invoices as paid
-- ✅ Delete invoices with confirmation (warns if paid)
-- ✅ Complete GST breakdown on invoices
-
-### 📊 Sales Reports & Analytics
-- ✅ **Total sales value** and **GST collected**
-- ✅ Total orders count
-- ✅ Completed vs pending orders
-- ✅ **Unpaid invoices** - Count and total amount
-- ✅ **Paid invoices** - Count and total amount
-- ✅ **Top 10 selling items** by quantity and revenue
-- ✅ One-click report refresh
-
-### ⚠️ Alerts & Notifications
-- ✅ **Low stock alerts** - Shows items below reorder level
-- ✅ Highlighted in red on inventory view
-- ✅ Suggested reorder quantity calculation
-- ✅ Sorted by urgency (most critical first)
-
-### 💾 Data Integrity
-- ✅ Foreign key constraints enforced
-- ✅ Cascade prevention on deletions
-- ✅ Transaction management with rollback on errors
-- ✅ Validation at multiple levels (UI, business logic, database)
-
----
-
-## 🆕 Recent Improvements
-
-### Enhanced Goods Receipt Editing
-- **Smart cell editing** - Double-click any cell to edit, press Enter to save
-- **Ordered quantity display** - Always visible for reference (cannot be edited)
-- **Intelligent validation** - Cannot exceed ordered quantities
-- **Auto-calculation** - Rejected quantity updates automatically
-- **Live summary** - Real-time totals at bottom of screen
-- **Better UX** - Escape to cancel, instructions displayed
-
-### Purchase Orders Management
-- **Completed orders toggle** - Hide completed POs by default to reduce clutter
-- **Show/Hide button** - View historical completed orders when needed
-- **Visual distinction** - Completed orders appear grayed out
-- **Cleaner interface** - Focus on active orders
+The system ensures both sides of this equation are captured cleanly and transparently.
 
 ---
 
 ## ⚠️ Known Limitations
 
-### Current Restrictions
-- ❌ No user authentication or role-based access control
-- ❌ No export to PDF or Excel (CSV)
-- ❌ No backup/restore functionality
-- ❌ Single-user system (no multi-user support)
-- ❌ No email integration for invoices
-- ❌ No barcode scanning support
-- ❌ No batch/lot tracking
-- ❌ No expiry date management
+### GST Scope Limitations
 
-### Design Choices
-- Inventory is **immediately reduced** when sales order is created (not when invoice is paid)
-- Deleting a sales order does **not restore inventory** (intentional to prevent misuse)
-- One invoice per sales order (no partial invoicing)
+* No CGST / SGST / IGST split
+* No place-of-supply logic
+* No HSN-wise statutory summaries
+* No return matching (GSTR-1 vs 2B)
+* No credit reversal or time-limit rules
+
+These are **regulatory layers**, not architectural flaws, and can be added on top of the existing design.
+
+### System Limitations
+
+* No user authentication or role-based access
+* No export to PDF or Excel
+* Single-user desktop system
+* No email or portal integration
 
 ---
 
 ## ▶️ How to Run the Project
 
-### Prerequisites
-- Python 3.7 or higher
-- No additional packages required (uses standard library only)
+1. Ensure Python 3.7 or higher is installed
+2. Navigate to the project directory
+3. Run:
 
-### Running the Application
+```bash
+python main.py
+```
 
-1. **Clone or download** the project files
-2. **Navigate** to the project directory:
-   ```bash
-   cd inventory-management
-   ```
-3. **Run the main file**:
-   ```bash
-   python3 main.py
-   ```
-   or on Windows:
-   ```bash
-   python main.py
-   ```
+The application will initialize the database automatically and launch the GUI.
 
-The application will automatically:
-- Create `integrated_system.db` SQLite database
-- Initialize all required tables
-- Launch the GUI window
-
----
-
-## 🚀 Possible Future Enhancements
-
-### High Priority
-- [ ] PDF invoice generation
-- [ ] Export reports to Excel/CSV
-- [ ] User login system with roles (Admin, Purchaser, Sales)
-- [ ] Dashboard with key metrics and charts
-
-### Medium Priority
-- [ ] Purchase returns and credit notes
-- [ ] Sales returns and refunds
-- [ ] Email invoice to customers
-- [ ] Backup and restore database
-- [ ] Search and filter across all modules
-
-### Low Priority
-- [ ] Dark mode theme
-- [ ] Barcode scanning integration
-- [ ] Multiple warehouse locations
-- [ ] Batch/lot tracking for items
-- [ ] Expiry date management
-- [ ] SMS notifications for low stock
-
----
-
-## 📸 Screenshots
-
-![Inventory Management](screenshots/APPFINAL1.png)
-
-![Purchase Orders](screenshots/APPFINAL2.png)
-
-![Goods Receipt](screenshots/APPFINAL3.png)
-
-![Sales Orders](screenshots/APPFINAL4.png)
-
-![Reports](screenshots/APPFINAL5.png)
-
----
-
-## 🧪 Testing the System
 
 ### Sample Workflow
 
@@ -276,55 +135,10 @@ The application will automatically:
 
 ---
 
-## 📌 Important Notes
-
-### GST Compliance
-This system follows Indian GST structure:
-- Purchase GST and Selling GST tracked separately
-- HSN code support
-- GSTIN tracking for suppliers and customers
-- Subtotal, GST Amount, and Total displayed clearly
-
-### Data Integrity
-- The system enforces referential integrity
-- Cannot delete records that are referenced elsewhere
-- All monetary values use 2 decimal precision
-- Timestamps track last updates
-
-### Educational Purpose
-This project was created **strictly for academic learning** and demonstrates:
-- Professional software structure
-- Business logic implementation
-- Database normalization
-- User interface design
-- Error handling and validation
-
-It prioritizes **clarity and correctness** over production-grade performance optimization.
-
----
-
-## 👨‍💻 Author
-
-**Mehroom**  
-Inventory Management System with GST Support  
-College Project - 2024
-
----
-
-## 📝 License
-
-This project is for educational purposes only.  
-Not intended for commercial use or production deployment.
-
----
-
-## 🙏 Acknowledgments
-
-- Python and Tkinter communities for excellent documentation
-- SQLite for providing a robust embedded database
-- College faculty for project guidance
-
----
-
-**Last Updated:** December 2025  
-**Version:** 2.0 (Multi-item + GST Support)
+###Screenshots
+![screenshot1](screenshots/APPFINAL1.png)
+![screenshot2](screenshots/APPFINAL2.png)
+![screenshot3](screenshots/APPFINAL3.png)
+![screenshot4](screenshots/APPFINAL4.png)
+![screenshot5](screenshots/APPFINAL5.png)
+![screenshot6](screenshots/APPFINAL6.png)
