@@ -14,15 +14,17 @@ class SalesModule:
         self.show_completed_sos = False
         self.create_customers_tab()
         self.create_sales_order_tab()
-        self.create_delivery_tab()  # NEW TAB
+        self.create_delivery_tab()
         self.create_invoices_tab()
+        self.create_gst_summary_tab()
         self.create_sales_reports_tab()
     
     def refresh_all(self):
         self.refresh_customers()
         self.refresh_sales_orders()
-        self.refresh_delivery_history()  # NEW
+        self.refresh_delivery_history()
         self.refresh_invoices()
+        self.refresh_gst_summary()
         self.refresh_sales_reports()
     
     def calculate_gst_price(self, rate, gst_percent):
@@ -998,13 +1000,221 @@ class SalesModule:
         ttk.Button(btn_frame, text="❌ Cancel", command=dialog.destroy).pack(side='left', padx=5)
     
     def edit_delivery(self):
-        """Edit a delivery record"""
+        """Edit/Complete a partial delivery"""
         selected = self.delivery_tree.selection()
         if not selected:
             messagebox.showwarning("Warning", "Select a delivery record")
             return
         
-        messagebox.showinfo("Info", "Delivery editing: Check delivered quantities against invoices.\nFor now, use 'View Details' to review.")
+        values = self.delivery_tree.item(selected[0])['values']
+        so_number = values[0]
+        status = values[5]
+        
+        # Only allow editing partially delivered orders
+        if status == "Delivered":
+            messagebox.showinfo("Info", f"SO #{so_number} is already fully delivered")
+            return
+        
+        # Check if it's partially delivered
+        self.db.execute("SELECT status FROM Sales_Orders WHERE so_number = ?", (so_number,))
+        current_status = self.db.fetchone()[0]
+        
+        if current_status != "Partially Delivered":
+            messagebox.showinfo("Info", "This order hasn't been partially delivered yet")
+            return
+        
+        dialog = tk.Toplevel(self.app.root)
+        dialog.title(f"Complete Delivery - SO #{so_number}")
+        dialog.geometry("900x650")
+        dialog.transient(self.app.root)
+        dialog.grab_set()
+        
+        info_frame = ttk.LabelFrame(dialog, text="Sales Order Information", padding=10)
+        info_frame.pack(fill='x', padx=10, pady=10)
+        
+        ttk.Label(info_frame, text=f"SO #{so_number} - Status: {current_status}", 
+            font=('Arial', 12, 'bold')).pack()
+        ttk.Label(info_frame, text="Deliver remaining quantities to complete the order", 
+            font=('Arial', 9), foreground='blue').pack(pady=5)
+        
+        # Get items with remaining quantities
+        items_frame = ttk.LabelFrame(dialog, text="Items (Double-click 'Deliver' to edit)", padding=10)
+        items_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        columns = ("Item", "Ordered", "Remaining", "Deliver", "Stock")
+        tree = ttk.Treeview(items_frame, columns=columns, show='headings', height=12)
+        col_widths = [250, 100, 100, 100, 100]
+        for i, col in enumerate(columns):
+            tree.heading(col, text=col)
+            tree.column(col, width=col_widths[i])
+        tree.pack(fill='both', expand=True)
+        
+        # Load items - show remaining to deliver
+        self.db.execute('''
+            SELECT soi.item_id, i.name, soi.quantity, inv.quantity_on_hand
+            FROM Sales_Order_Items soi
+            JOIN Items i ON soi.item_id = i.item_id
+            JOIN Inventory inv ON i.item_id = inv.item_id
+            WHERE soi.so_number = ?
+        ''', (so_number,))
+        
+        item_data = {}  # {tree_id: (item_id, ordered_qty, stock)}
+        
+        for item_id, name, ordered, stock in self.db.fetchall():
+            # For partially delivered, assume we need to deliver the rest
+            # In a real system, you'd track delivered quantities separately
+            remaining = ordered  # Simplified: show full quantity as remaining
+            tree_id = tree.insert("", "end", values=(name, ordered, remaining, remaining, stock))
+            item_data[tree_id] = (item_id, ordered, stock)
+        
+        # Edit delivery quantity on double-click
+        current_entry = None
+        
+        def edit_deliver_qty(event):
+            nonlocal current_entry
+            if current_entry:
+                try:
+                    current_entry.destroy()
+                except:
+                    pass
+                current_entry = None
+            
+            region = tree.identify("region", event.x, event.y)
+            if region != "cell":
+                return
+            
+            row_id = tree.identify_row(event.y)
+            col_id = tree.identify_column(event.x)
+            
+            if not row_id or col_id != "#4":  # Only "Deliver" column
+                return
+            
+            try:
+                x, y, width, height = tree.bbox(row_id, col_id)
+            except:
+                return
+            
+            current_value = tree.item(row_id)["values"][3]
+            
+            entry = ttk.Entry(tree, font=('Arial', 10))
+            entry.insert(0, str(current_value))
+            entry.select_range(0, tk.END)
+            entry.place(x=x, y=y, width=width, height=height)
+            entry.focus()
+            current_entry = entry
+            
+            def save_edit(event=None):
+                nonlocal current_entry
+                try:
+                    new_qty = int(entry.get())
+                    item_id, ordered, stock = item_data[row_id]
+                    remaining = int(tree.item(row_id)["values"][2])
+                    
+                    if new_qty < 0:
+                        messagebox.showerror("Error", "Quantity cannot be negative")
+                        return
+                    if new_qty > remaining:
+                        messagebox.showerror("Error", f"Cannot deliver more than remaining ({remaining})")
+                        return
+                    if new_qty > stock:
+                        messagebox.showerror("Error", f"Insufficient stock! Available: {stock}")
+                        return
+                    
+                    values = list(tree.item(row_id)["values"])
+                    values[3] = new_qty
+                    tree.item(row_id, values=values)
+                except ValueError:
+                    messagebox.showerror("Error", "Enter valid quantity")
+                finally:
+                    entry.destroy()
+                    current_entry = None
+            
+            def cancel_edit(event):
+                nonlocal current_entry
+                entry.destroy()
+                current_entry = None
+            
+            entry.bind("<Return>", save_edit)
+            entry.bind("<FocusOut>", save_edit)
+            entry.bind("<Escape>", cancel_edit)
+        
+        tree.bind("<Double-1>", edit_deliver_qty)
+        
+        def complete_delivery():
+            """Complete the remaining delivery"""
+            try:
+                # STEP 1: VALIDATE ALL ITEMS FIRST (before making any changes)
+                items_to_deliver = []
+                
+                for tree_id in tree.get_children():
+                    values = tree.item(tree_id)["values"]
+                    deliver_qty = int(values[3])
+                    remaining_qty = int(values[2])
+                    item_id, ordered_qty, stock = item_data[tree_id]
+                    
+                    # Check stock BEFORE doing anything
+                    if deliver_qty > stock:
+                        messagebox.showerror("Error", f"{values[0]}: Insufficient stock! Available: {stock}")
+                        return  # Exit without making ANY changes
+                    
+                    # Store validated items
+                    items_to_deliver.append({
+                        'item_id': item_id,
+                        'item_name': values[0],
+                        'deliver_qty': deliver_qty,
+                        'remaining_qty': remaining_qty,
+                        'ordered_qty': ordered_qty
+                    })
+                
+                # STEP 2: ALL ITEMS VALIDATED - NOW UPDATE DATABASE
+                total_delivered = 0
+                all_items_complete = True
+                
+                for item_info in items_to_deliver:
+                    if item_info['deliver_qty'] > 0:
+                        # Reduce inventory
+                        self.db.execute('''UPDATE Inventory 
+                            SET quantity_on_hand = quantity_on_hand - ?,
+                                last_updated = ?
+                            WHERE item_id = ?''',
+                            (item_info['deliver_qty'], datetime.now(), item_info['item_id']))
+                        
+                        total_delivered += item_info['deliver_qty']
+                    
+                    # Check if this item is fully delivered
+                    if item_info['deliver_qty'] < item_info['remaining_qty']:
+                        all_items_complete = False
+                
+                # Update SO status
+                if all_items_complete and total_delivered > 0:
+                    new_status = "Delivered"
+                else:
+                    new_status = "Partially Delivered"
+                
+                self.db.execute('''UPDATE Sales_Orders 
+                    SET status = ?, delivery_date = ?
+                    WHERE so_number = ?''',
+                    (new_status, datetime.now().date(), so_number))
+                
+                self.db.commit()
+                
+                msg = f"Delivery Updated!\n\n"
+                msg += f"SO #{so_number}\n"
+                msg += f"Additional Quantity Delivered: {total_delivered}\n"
+                msg += f"New Status: {new_status}"
+                
+                messagebox.showinfo("Success", msg)
+                dialog.destroy()
+                self.app.refresh_all_tabs()
+                
+            except Exception as e:
+                self.db.rollback()
+                messagebox.showerror("Error", f"Failed: {str(e)}")
+        
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(pady=10)
+        ttk.Button(btn_frame, text="✅ Complete Delivery", command=complete_delivery).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="❌ Cancel", command=dialog.destroy).pack(side='left', padx=5)
     
     def view_delivery_details(self):
         """View delivery details"""
@@ -1047,6 +1257,378 @@ class SalesModule:
         for row in self.db.fetchall():
             tree.insert('', 'end', values=row)
             
+            
+    
+    # ==================== GST SUMMARY TAB ====================
+    
+    def create_gst_summary_tab(self):
+        """Create dedicated GST summary tab with improved UI"""
+        gst_frame = ttk.Frame(self.notebook)
+        self.notebook.add(gst_frame, text="💰 GST Summary")
+    
+        # Top frame with title and refresh
+        top_frame = ttk.Frame(gst_frame)
+        top_frame.pack(side='top', fill='x', padx=15, pady=15)
+    
+        ttk.Label(top_frame, text="GST Tax Summary & Liability", 
+            font=('Arial', 18, 'bold')).pack(side='left', padx=10)
+        ttk.Button(top_frame, text="🔄 Refresh", command=self.refresh_gst_summary).pack(side='right', padx=10)
+    
+        # Scrollable container
+        canvas = tk.Canvas(gst_frame, bg='#f5f5f5')
+        scrollbar = ttk.Scrollbar(gst_frame, orient="vertical", command=canvas.yview)
+        self.gst_scrollable_frame = ttk.Frame(canvas)
+    
+        self.gst_scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+    
+        canvas.create_window((0, 0), window=self.gst_scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+    
+        canvas.pack(side="left", fill="both", expand=True, padx=15, pady=10)
+        scrollbar.pack(side="right", fill="y", pady=10, padx=(0, 15))
+    
+        # Initial load
+        self.refresh_gst_summary()
+
+    def refresh_gst_summary(self):
+        """Refresh the complete GST summary with improved formatting"""
+        # Clear existing content
+        for widget in self.gst_scrollable_frame.winfo_children():
+            widget.destroy()
+    
+        # ========== OUTPUT GST (from Sales Orders) ==========
+        self.db.execute('''
+            SELECT 
+                soi.gst_percent,
+                COALESCE(SUM(soi.gst_amount), 0) as total_gst_collected,
+                COALESCE(SUM(soi.rate * soi.quantity), 0) as total_base_amount,
+                COUNT(DISTINCT so.so_number) as order_count,
+                COUNT(*) as item_count
+            FROM Sales_Order_Items soi
+            JOIN Sales_Orders so ON soi.so_number = so.so_number
+            GROUP BY soi.gst_percent
+            ORDER BY soi.gst_percent
+        ''')
+    
+        output_gst_data = {}
+        for row in self.db.fetchall():
+            output_gst_data[row[0]] = {
+                'gst': row[1],
+                'base': row[2],
+                'orders': row[3],
+                'items': row[4]
+            }
+    
+        # ========== INPUT GST (from Purchase Orders) ==========
+        self.db.execute('''
+            SELECT 
+                poi.gst_percent,
+                COALESCE(SUM(poi.gst_amount), 0) as total_gst_paid,
+                COALESCE(SUM(poi.rate * poi.quantity), 0) as total_base_amount,
+                COUNT(DISTINCT po.po_number) as order_count,
+                COUNT(*) as item_count
+            FROM Purchase_Order_Items poi
+            JOIN Purchase_Orders po ON poi.po_number = po.po_number
+            GROUP BY poi.gst_percent
+            ORDER BY poi.gst_percent
+        ''')
+    
+        input_gst_data = {}
+        for row in self.db.fetchall():
+            input_gst_data[row[0]] = {
+                'gst': row[1],
+                'base': row[2],
+                'orders': row[3],
+                'items': row[4]
+            }
+    
+    #========== GET ALL UNIQUE GST RATES ==========
+        all_gst_rates = sorted(set(list(output_gst_data.keys()) + list(input_gst_data.keys())))
+    
+        if all_gst_rates:
+            # ========== COLOR LEGEND ==========
+            legend_frame = ttk.LabelFrame(self.gst_scrollable_frame, text="Color Legend", padding=15)
+            legend_frame.pack(fill='x', pady=(0, 20))
+        
+            legend_items = [
+                ("● 0%", '#666666'),
+                ("● 1-5%", '#28a745'),
+                ("● 6-12%", '#17a2b8'),
+                ("● 13-18%", '#ffc107'),
+                ("● 19%+", '#dc3545')
+            ]
+        
+            for text, color in legend_items:
+                ttk.Label(legend_frame, text=text, font=('Arial', 10, 'bold'), 
+                    foreground=color).pack(side='left', padx=15)
+        
+            ttk.Label(legend_frame, text="(Higher rates = warmer colors)", 
+                font=('Arial', 9), foreground='gray').pack(side='left', padx=10)
+        
+            # ========== OUTPUT GST SECTION ==========
+            output_section = ttk.LabelFrame(self.gst_scrollable_frame, 
+                text="📤 OUTPUT GST - Collected from Sales (What customers paid you)", 
+                padding=20)
+            output_section.pack(fill='x', pady=(0, 20))
+        
+            # Create table-like header
+            header_frame = ttk.Frame(output_section)
+            header_frame.pack(fill='x', pady=(0, 10))
+        
+            headers = [
+                ("Rate", 100),
+                ("Base Amount", 150),
+                ("GST Collected", 150),
+                ("Orders", 100),
+                ("Items", 100)
+            ]
+        
+            for text, width in headers:
+                label = ttk.Label(header_frame, text=text, font=('Arial', 11, 'bold'))
+                label.pack(side='left', padx=10)
+                label.config(width=width//10)  # Approximate width
+        
+            ttk.Separator(output_section, orient='horizontal').pack(fill='x', pady=10)
+        
+            total_output_base = 0
+            total_output_gst = 0
+        
+            for gst_rate in all_gst_rates:
+                if gst_rate in output_gst_data:
+                    data = output_gst_data[gst_rate]
+                    total_output_base += data['base']
+                    total_output_gst += data['gst']
+                
+                    # Determine color
+                    color = self._get_gst_color(gst_rate)
+                
+                    row_frame = ttk.Frame(output_section)
+                    row_frame.pack(fill='x', pady=5)
+                    
+                    ttk.Label(row_frame, text=f"{gst_rate:.1f}%", 
+                        font=('Arial', 11, 'bold'), foreground=color, width=10).pack(side='left', padx=10)
+                    ttk.Label(row_frame, text=f"₹{data['base']:,.2f}", 
+                        font=('Arial', 11), width=15).pack(side='left', padx=10)
+                    ttk.Label(row_frame, text=f"₹{data['gst']:,.2f}", 
+                        font=('Arial', 11, 'bold'), foreground=color, width=15).pack(side='left', padx=10)
+                    ttk.Label(row_frame, text=str(data['orders']), 
+                        font=('Arial', 11), width=10).pack(side='left', padx=10)
+                    ttk.Label(row_frame, text=str(data['items']), 
+                        font=('Arial', 11), width=10).pack(side='left', padx=10)
+        
+            # Total row
+            ttk.Separator(output_section, orient='horizontal').pack(fill='x', pady=10)
+        
+            total_frame = ttk.Frame(output_section)
+            total_frame.pack(fill='x', pady=10)
+        
+            ttk.Label(total_frame, text="TOTAL", 
+                font=('Arial', 12, 'bold'), width=10).pack(side='left', padx=10)
+            ttk.Label(total_frame, text=f"₹{total_output_base:,.2f}", 
+                font=('Arial', 12, 'bold'), foreground='blue', width=15).pack(side='left', padx=10)
+            ttk.Label(total_frame, text=f"₹{total_output_gst:,.2f}", 
+                font=('Arial', 12, 'bold'), foreground='green', width=15).pack(side='left', padx=10)
+        
+            if not output_gst_data:
+                ttk.Label(output_section, text="No sales data yet", 
+                    font=('Arial', 11), foreground='gray').pack(pady=20)
+        
+            # ========== INPUT GST SECTION ==========
+            input_section = ttk.LabelFrame(self.gst_scrollable_frame, 
+                text="📥 INPUT GST - Paid on Purchases (What you paid to suppliers)", 
+                padding=20)
+            input_section.pack(fill='x', pady=(0, 20))
+            
+            # Header
+            header_frame = ttk.Frame(input_section)
+            header_frame.pack(fill='x', pady=(0, 10))
+        
+            for text, width in headers:
+                label = ttk.Label(header_frame, text=text, font=('Arial', 11, 'bold'))
+                label.pack(side='left', padx=10)
+                label.config(width=width//10)
+        
+            ttk.Separator(input_section, orient='horizontal').pack(fill='x', pady=10)
+        
+            total_input_base = 0
+            total_input_gst = 0
+        
+            for gst_rate in all_gst_rates:
+                if gst_rate in input_gst_data:
+                    data = input_gst_data[gst_rate]
+                    total_input_base += data['base']
+                    total_input_gst += data['gst']
+                
+                    color = self._get_gst_color(gst_rate)
+                
+                    row_frame = ttk.Frame(input_section)
+                    row_frame.pack(fill='x', pady=5)
+                    
+                    ttk.Label(row_frame, text=f"{gst_rate:.1f}%", 
+                        font=('Arial', 11, 'bold'), foreground=color, width=10).pack(side='left', padx=10)
+                    ttk.Label(row_frame, text=f"₹{data['base']:,.2f}", 
+                        font=('Arial', 11), width=15).pack(side='left', padx=10)
+                    ttk.Label(row_frame, text=f"₹{data['gst']:,.2f}", 
+                        font=('Arial', 11, 'bold'), foreground=color, width=15).pack(side='left', padx=10)
+                    ttk.Label(row_frame, text=str(data['orders']), 
+                        font=('Arial', 11), width=10).pack(side='left', padx=10)
+                    ttk.Label(row_frame, text=str(data['items']), 
+                        font=('Arial', 11), width=10).pack(side='left', padx=10)
+        
+            # Total row
+            ttk.Separator(input_section, orient='horizontal').pack(fill='x', pady=10)
+        
+            total_frame = ttk.Frame(input_section)
+            total_frame.pack(fill='x', pady=10)
+        
+            ttk.Label(total_frame, text="TOTAL", 
+                font=('Arial', 12, 'bold'), width=10).pack(side='left', padx=10)
+            ttk.Label(total_frame, text=f"₹{total_input_base:,.2f}", 
+                font=('Arial', 12, 'bold'), foreground='blue', width=15).pack(side='left', padx=10)
+            ttk.Label(total_frame, text=f"₹{total_input_gst:,.2f}", 
+                font=('Arial', 12, 'bold'), foreground='orange', width=15).pack(side='left', padx=10)
+        
+            if not input_gst_data:
+                ttk.Label(input_section, text="No purchase data yet", 
+                    font=('Arial', 11), foreground='gray').pack(pady=20)
+            
+            # ========== NET GST LIABILITY ==========
+            net_gst = total_output_gst - total_input_gst
+        
+            net_section = ttk.LabelFrame(self.gst_scrollable_frame, 
+                text="💰 NET GST LIABILITY (For Government Filing)", 
+                padding=25)
+            net_section.pack(fill='x', pady=(0, 20))
+        
+            # Calculation display
+            calc_frame = ttk.Frame(net_section)
+            calc_frame.pack(fill='x', pady=15)
+        
+            ttk.Label(calc_frame, text="Output GST (Collected):", 
+                font=('Arial', 12)).pack(side='left', padx=15)
+            ttk.Label(calc_frame, text=f"₹{total_output_gst:,.2f}", 
+                font=('Arial', 12, 'bold'), foreground='green').pack(side='left', padx=10)
+        
+            ttk.Label(calc_frame, text="  −  ", 
+                font=('Arial', 14, 'bold')).pack(side='left', padx=15)
+        
+            ttk.Label(calc_frame, text="Input GST (Paid):", 
+                font=('Arial', 12)).pack(side='left', padx=15)
+            ttk.Label(calc_frame, text=f"₹{total_input_gst:,.2f}", 
+                font=('Arial', 12, 'bold'), foreground='orange').pack(side='left', padx=10)
+        
+            ttk.Label(calc_frame, text="  =  ", 
+                font=('Arial', 14, 'bold')).pack(side='left', padx=15)
+        
+            ttk.Separator(net_section, orient='horizontal').pack(fill='x', pady=20)
+        
+            # Net amount - BIG DISPLAY
+            result_frame = ttk.Frame(net_section)
+            result_frame.pack(fill='x', pady=20)
+        
+            if net_gst > 0:
+                ttk.Label(result_frame, text="GST PAYABLE TO GOVERNMENT:", 
+                    font=('Arial', 16, 'bold')).pack(pady=8)
+                ttk.Label(result_frame, text=f"₹{net_gst:,.2f}", 
+                    font=('Arial', 24, 'bold'), foreground='#dc3545').pack(pady=8)
+            
+                info_text = "✓ You need to pay this amount to the government in your GST return filing."
+                info_color = '#dc3545'
+            elif net_gst < 0:
+                ttk.Label(result_frame, text="GST REFUND CLAIMABLE:", 
+                    font=('Arial', 16, 'bold')).pack(pady=8)
+                ttk.Label(result_frame, text=f"₹{abs(net_gst):,.2f}", 
+                    font=('Arial', 24, 'bold'), foreground='#28a745').pack(pady=8)
+            
+                info_text = "✓ You can claim this refund from the government (Input GST > Output GST)."
+                info_color = '#28a745'
+            else:
+                ttk.Label(result_frame, text="NET GST LIABILITY:", 
+                    font=('Arial', 16, 'bold')).pack(pady=8)
+                ttk.Label(result_frame, text="₹0.00", 
+                    font=('Arial', 24, 'bold'), foreground='#17a2b8').pack(pady=8)
+            
+                info_text = "✓ Your Input and Output GST are perfectly balanced. No payment or refund."
+                info_color = '#17a2b8'
+        
+            ttk.Label(net_section, text=info_text, 
+                font=('Arial', 11), foreground=info_color).pack(pady=10)
+        
+            # ========== BRACKET BREAKDOWN ==========
+            ttk.Separator(net_section, orient='horizontal').pack(fill='x', pady=20)
+        
+            ttk.Label(net_section, text="Net GST Liability by Tax Bracket:", 
+                font=('Arial', 13, 'bold')).pack(anchor='w', pady=(15, 15))
+        
+            bracket_frame = ttk.Frame(net_section)
+            bracket_frame.pack(fill='x')
+        
+            # Header
+            bracket_header = ttk.Frame(bracket_frame)
+            bracket_header.pack(fill='x', pady=(0, 10))
+        
+            bracket_headers = [
+                ("Tax Rate", 12),
+                ("Output GST", 15),
+                ("Input GST", 15),
+                ("Net Payable", 15)
+            ]
+        
+            for text, width in bracket_headers:
+                ttk.Label(bracket_header, text=text, font=('Arial', 11, 'bold'), 
+                    width=width).pack(side='left', padx=12)
+        
+            ttk.Separator(bracket_frame, orient='horizontal').pack(fill='x', pady=8)
+        
+            for gst_rate in all_gst_rates:
+                output_gst_amt = output_gst_data.get(gst_rate, {}).get('gst', 0)
+                input_gst_amt = input_gst_data.get(gst_rate, {}).get('gst', 0)
+                net_bracket = output_gst_amt - input_gst_amt
+            
+                if output_gst_amt > 0 or input_gst_amt > 0:
+                    color = self._get_gst_color(gst_rate)
+                
+                    bracket_row = ttk.Frame(bracket_frame)
+                    bracket_row.pack(fill='x', pady=5)
+                
+                    ttk.Label(bracket_row, text=f"{gst_rate:.1f}%", 
+                        font=('Arial', 11, 'bold'), foreground=color, width=12).pack(side='left', padx=12)
+                    ttk.Label(bracket_row, text=f"₹{output_gst_amt:,.2f}", 
+                        font=('Arial', 11), width=15).pack(side='left', padx=12)
+                    ttk.Label(bracket_row, text=f"₹{input_gst_amt:,.2f}", 
+                        font=('Arial', 11), width=15).pack(side='left', padx=12)
+                
+                    net_color = '#dc3545' if net_bracket > 0 else ('#28a745' if net_bracket < 0 else '#17a2b8')
+                    ttk.Label(bracket_row, text=f"₹{net_bracket:,.2f}", 
+                        font=('Arial', 11, 'bold'), foreground=net_color, width=15).pack(side='left', padx=12)
+        
+        else:
+            # No data
+            empty_frame = ttk.Frame(self.gst_scrollable_frame)
+            empty_frame.pack(expand=True, fill='both', pady=100)
+        
+            ttk.Label(empty_frame, text="📊 No GST Data Available", 
+                font=('Arial', 18, 'bold'), foreground='gray').pack(pady=15)
+            ttk.Label(empty_frame, 
+                text="GST summary will appear once you create sales orders and purchase orders.\nBoth are needed to calculate net GST liability.", 
+                font=('Arial', 12), foreground='gray', justify='center').pack(pady=8)
+
+    def _get_gst_color(self, gst_rate):
+        """Helper to get color for GST rate"""
+        if gst_rate == 0:
+            return '#666666'
+        elif gst_rate <= 5:
+            return '#28a745'
+        elif gst_rate <= 12:
+            return '#17a2b8'
+        elif gst_rate <= 18:
+            return '#ffc107'
+        else:
+            return '#dc3545'
+    
     # ==================== INVOICES TAB ====================
     
     def create_invoices_tab(self):
@@ -1098,16 +1680,16 @@ class SalesModule:
         for row in self.db.fetchall():
             display_row = (row[0], row[1], row[2], row[3], row[4],
                           f"₹{row[5]:.2f}", f"₹{row[6]:.2f}", f"₹{row[7]:.2f}", row[8])
-            self.inv_tree.insert('', 'end', values=display_row)
-    
+            
+            # Insert ONCE with appropriate tag
             if row[8] == "Paid":
                 self.inv_tree.insert('', 'end', values=display_row, tags=('paid',))
             else:
                 self.inv_tree.insert('', 'end', values=display_row, tags=('unpaid',))
     
-        self.inv_tree.tag_configure('paid', background='#d4edda', foreground='#155724')  # Light green
-        self.inv_tree.tag_configure('unpaid', background='#f8d7da', foreground='#721c24')  # Light red
-    
+        self.inv_tree.tag_configure('paid', background='#d4edda', foreground='#155724')
+        self.inv_tree.tag_configure('unpaid', background='#f8d7da', foreground='#721c24')
+
     def generate_invoice(self):
         """Generate invoice from delivered sales order"""
         # Get delivered orders that don't have invoices
@@ -1153,6 +1735,43 @@ class SalesModule:
         due_entry.insert(0, (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d'))
         due_entry.pack(side='left', padx=5)
         
+        def create_invoice():
+            if not so_var.get():
+                messagebox.showerror("Error", "Select a sales order")
+                return
+            
+            try:
+                so_data = so_dict[so_var.get()]
+                so_number = so_data[0]
+                
+                # Get customer ID
+                self.db.execute("SELECT customer_id FROM Sales_Orders WHERE so_number = ?", (so_number,))
+                customer_id = self.db.fetchone()[0]
+                
+                # Create invoice
+                self.db.execute('''
+                    INSERT INTO Invoices (so_number, customer_id, invoice_date, due_date,
+                        subtotal, total_gst, total_amount, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (so_number, customer_id, datetime.now().date(), due_entry.get(),
+                      so_data[3], so_data[4], so_data[5], 'Unpaid'))
+                
+                invoice_id = self.db.lastrowid()
+                self.db.commit()
+                
+                messagebox.showinfo("Success", 
+                    f"Invoice #{invoice_id} generated!\n\nSO #{so_number}\nAmount: ₹{so_data[5]:.2f}\nDue: {due_entry.get()}")
+                dialog.destroy()
+                self.refresh_invoices()
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed: {str(e)}")
+        
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(pady=10)
+        ttk.Button(btn_frame, text="✅ Generate Invoice", command=create_invoice).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="❌ Cancel", command=dialog.destroy).pack(side='left', padx=5)
+    
     def mark_invoice_paid(self):
         """Mark selected invoice as paid"""
         selected = self.inv_tree.selection()
@@ -1216,7 +1835,7 @@ class SalesModule:
         
         dialog = tk.Toplevel(self.app.root)
         dialog.title(f"Invoice #{invoice_id} Details")
-        dialog.geometry("1200x800")
+        dialog.geometry("1500x900")
         dialog.transient(self.app.root)
         dialog.grab_set()
         
@@ -1325,42 +1944,8 @@ class SalesModule:
         
         ttk.Button(btn_frame, text="❌ Close", command=dialog.destroy).pack(side='left', padx=5)
         
-        def create_invoice():
-            if not so_var.get():
-                messagebox.showerror("Error", "Select a sales order")
-                return
-            
-            try:
-                so_data = so_dict[so_var.get()]
-                so_number = so_data[0]
-                
-                # Get customer ID
-                self.db.execute("SELECT customer_id FROM Sales_Orders WHERE so_number = ?", (so_number,))
-                customer_id = self.db.fetchone()[0]
-                
-                # Create invoice
-                self.db.execute('''
-                    INSERT INTO Invoices (so_number, customer_id, invoice_date, due_date,
-                        subtotal, total_gst, total_amount, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (so_number, customer_id, datetime.now().date(), due_entry.get(),
-                      so_data[3], so_data[4], so_data[5], 'Unpaid'))
-                
-                invoice_id = self.db.lastrowid()
-                self.db.commit()
-                
-                messagebox.showinfo("Success", 
-                    f"Invoice #{invoice_id} generated!\n\nSO #{so_number}\nAmount: ₹{so_data[5]:.2f}\nDue: {due_entry.get()}")
-                dialog.destroy()
-                self.refresh_invoices()
-                
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed: {str(e)}")
-        
-        btn_frame = ttk.Frame(dialog)
-        btn_frame.pack(pady=10)
-        ttk.Button(btn_frame, text="✅ Generate Invoice", command=create_invoice).pack(side='left', padx=5)
-        ttk.Button(btn_frame, text="❌ Cancel", command=dialog.destroy).pack(side='left', padx=5)
+    
+    
     
     # ==================== SALES REPORTS TAB ====================
     
@@ -1368,20 +1953,20 @@ class SalesModule:
         """Create sales reports tab"""
         report_frame = ttk.Frame(self.notebook)
         self.notebook.add(report_frame, text="📊 Reports")
-        
+    
         top_frame = ttk.Frame(report_frame)
         top_frame.pack(side='top', fill='x', padx=10, pady=10)
-        
+    
         ttk.Label(top_frame, text="Sales Reports & Analytics", font=('Arial', 14, 'bold')).pack(pady=10)
         ttk.Button(top_frame, text="🔄 Refresh", command=self.refresh_sales_reports).pack(pady=5)
-        
+    
         # Summary cards
         summary_frame = ttk.LabelFrame(report_frame, text="Summary Statistics", padding=15)
         summary_frame.pack(fill='x', padx=10, pady=10)
-        
+    
         # Create grid for stats
         self.stats_labels = {}
-        
+    
         stats = [
             ("Total Orders:", "total_orders"),
             ("Pending Orders:", "pending_orders"),
@@ -1392,35 +1977,42 @@ class SalesModule:
             ("Unpaid Invoices:", "unpaid_invoices"),
             ("Total Customers:", "total_customers")
         ]
-        
+    
         for i, (label, key) in enumerate(stats):
             row = i // 2
             col = (i % 2) * 2
-            
+        
             ttk.Label(summary_frame, text=label, font=('Arial', 10, 'bold')).grid(
                 row=row, column=col, sticky='w', padx=20, pady=8)
             value_label = ttk.Label(summary_frame, text="0", font=('Arial', 10), foreground='blue')
             value_label.grid(row=row, column=col+1, sticky='w', padx=10, pady=8)
             self.stats_labels[key] = value_label
-        
+    
+        # ADD THIS SECTION - GST Brackets Frame
+        self.gst_brackets_frame = ttk.LabelFrame(report_frame, text="💰 GST Collection Breakdown by Tax Bracket", padding=15)
+        self.gst_brackets_frame.pack(fill='x', padx=10, pady=10)
+    
         # Top customers
-        customers_frame = ttk.LabelFrame(report_frame, text="Top Customers by Revenue", padding=10)
+        customers_frame = ttk.LabelFrame(report_frame, text="Top Customers by Revenue (Double-click to view details)", padding=10)
         customers_frame.pack(fill='both', expand=True, padx=10, pady=10)
-        
-        columns = ("Customer", "Total Orders", "Total Revenue", "Avg Order Value")
+    
+        columns = ("Customer", "Orders", "Subtotal", "GST", "Total (Inc. GST)", "Avg Order")
         self.report_tree = ttk.Treeview(customers_frame, columns=columns, show='headings', height=15)
-        
-        widths = [200, 120, 150, 150]
+    
+        widths = [180, 80, 120, 100, 130, 120]
         for i, col in enumerate(columns):
             self.report_tree.heading(col, text=col)
             self.report_tree.column(col, width=widths[i])
-        
+    
         self.report_tree.pack(side='left', fill='both', expand=True)
-        
+    
         scrollbar = ttk.Scrollbar(customers_frame, orient='vertical', command=self.report_tree.yview)
         scrollbar.pack(side='right', fill='y')
         self.report_tree.configure(yscrollcommand=scrollbar.set)
-        
+    
+        # Bind double-click to view customer order details
+        self.report_tree.bind('<Double-1>', lambda e: self.view_customer_order_details())
+    
         self.refresh_sales_reports()
     
     def refresh_sales_reports(self):
@@ -1455,17 +2047,150 @@ class SalesModule:
         self.db.execute("SELECT COUNT(*) FROM Invoices WHERE status = 'Unpaid'")
         self.stats_labels['unpaid_invoices'].config(text=str(self.db.fetchone()[0]))
         
-        # Total customers
+                # Total customers
         self.db.execute("SELECT COUNT(*) FROM Customers")
         self.stats_labels['total_customers'].config(text=str(self.db.fetchone()[0]))
         
-        # Top customers
+        
+        
+        # Query to get GST collected by bracket from all sales orders
+        self.db.execute('''
+            SELECT 
+                soi.gst_percent,
+                COALESCE(SUM(soi.gst_amount), 0) as total_gst_collected,
+                COALESCE(SUM(soi.rate * soi.quantity), 0) as total_base_amount,
+                COALESCE(SUM(soi.total_price), 0) as total_with_gst,
+                COUNT(DISTINCT so.so_number) as order_count,
+                COUNT(*) as item_count
+            FROM Sales_Order_Items soi
+            JOIN Sales_Orders so ON soi.so_number = so.so_number
+            GROUP BY soi.gst_percent
+            ORDER BY soi.gst_percent
+        ''')
+        
+        gst_brackets = self.db.fetchall()
+        
+        if gst_brackets:
+            # Add color legend at the top
+            legend_frame = ttk.Frame(self.gst_brackets_frame)
+            legend_frame.pack(fill='x', pady=(0, 10))
+            
+            ttk.Label(legend_frame, text="Color Legend:", 
+                font=('Arial', 9, 'bold')).pack(side='left', padx=(0, 10))
+            
+            # Color indicators
+            ttk.Label(legend_frame, text="● 0%", 
+                font=('Arial', 9), foreground='#666666').pack(side='left', padx=5)
+            ttk.Label(legend_frame, text="● 1-5%", 
+                font=('Arial', 9), foreground='#28a745').pack(side='left', padx=5)
+            ttk.Label(legend_frame, text="● 6-12%", 
+                font=('Arial', 9), foreground='#17a2b8').pack(side='left', padx=5)
+            ttk.Label(legend_frame, text="● 13-18%", 
+                font=('Arial', 9), foreground='#ffc107').pack(side='left', padx=5)
+            ttk.Label(legend_frame, text="● 19%+", 
+                font=('Arial', 9), foreground='#dc3545').pack(side='left', padx=5)
+            
+            ttk.Label(legend_frame, text="(Higher rates = warmer colors)", 
+                font=('Arial', 8), foreground='gray').pack(side='left', padx=(10, 0))
+            
+            # Create header
+            header_frame = ttk.Frame(self.gst_brackets_frame)
+            header_frame.pack(fill='x', pady=(0, 5))
+            
+            ttk.Label(header_frame, text="Tax Rate", font=('Arial', 9, 'bold'), width=12).pack(side='left', padx=5)
+            ttk.Label(header_frame, text="Base Amount", font=('Arial', 9, 'bold'), width=15).pack(side='left', padx=5)
+            ttk.Label(header_frame, text="GST Collected", font=('Arial', 9, 'bold'), width=15).pack(side='left', padx=5)
+            ttk.Label(header_frame, text="Total (Inc GST)", font=('Arial', 9, 'bold'), width=15).pack(side='left', padx=5)
+            ttk.Label(header_frame, text="Orders", font=('Arial', 9, 'bold'), width=10).pack(side='left', padx=5)
+            ttk.Label(header_frame, text="Items", font=('Arial', 9, 'bold'), width=10).pack(side='left', padx=5)
+            
+            # Add separator
+            ttk.Separator(self.gst_brackets_frame, orient='horizontal').pack(fill='x', pady=5)
+            
+            # Display each bracket
+            total_base = 0
+            total_gst = 0
+            total_with_gst = 0
+            
+            for bracket in gst_brackets:
+                gst_percent, gst_collected, base_amount, amount_with_gst, orders, items = bracket
+                
+                total_base += base_amount
+                total_gst += gst_collected
+                total_with_gst += amount_with_gst
+                
+                bracket_frame = ttk.Frame(self.gst_brackets_frame)
+                bracket_frame.pack(fill='x', pady=2)
+                
+                # Color code based on GST rate
+                if gst_percent == 0:
+                    color = '#666666'  # Gray for 0%
+                elif gst_percent <= 5:
+                    color = '#28a745'  # Green for low tax
+                elif gst_percent <= 12:
+                    color = '#17a2b8'  # Blue for medium-low
+                elif gst_percent <= 18:
+                    color = '#ffc107'  # Yellow for medium
+                else:
+                    color = '#dc3545'  # Red for high tax
+                
+                ttk.Label(bracket_frame, text=f"{gst_percent:.1f}%", 
+                    font=('Arial', 10, 'bold'), foreground=color, width=12).pack(side='left', padx=5)
+                ttk.Label(bracket_frame, text=f"₹{base_amount:.2f}", 
+                    font=('Arial', 10), width=15).pack(side='left', padx=5)
+                ttk.Label(bracket_frame, text=f"₹{gst_collected:.2f}", 
+                    font=('Arial', 10, 'bold'), foreground=color, width=15).pack(side='left', padx=5)
+                ttk.Label(bracket_frame, text=f"₹{amount_with_gst:.2f}", 
+                    font=('Arial', 10), width=15).pack(side='left', padx=5)
+                ttk.Label(bracket_frame, text=str(orders), 
+                    font=('Arial', 10), width=10).pack(side='left', padx=5)
+                ttk.Label(bracket_frame, text=str(items), 
+                    font=('Arial', 10), width=10).pack(side='left', padx=5)
+            
+            # Add total row
+            ttk.Separator(self.gst_brackets_frame, orient='horizontal').pack(fill='x', pady=5)
+            
+            total_frame = ttk.Frame(self.gst_brackets_frame)
+            total_frame.pack(fill='x', pady=5)
+            
+            ttk.Label(total_frame, text="TOTAL", 
+                font=('Arial', 10, 'bold'), width=12).pack(side='left', padx=5)
+            ttk.Label(total_frame, text=f"₹{total_base:.2f}", 
+                font=('Arial', 10, 'bold'), foreground='blue', width=15).pack(side='left', padx=5)
+            ttk.Label(total_frame, text=f"₹{total_gst:.2f}", 
+                font=('Arial', 10, 'bold'), foreground='red', width=15).pack(side='left', padx=5)
+            ttk.Label(total_frame, text=f"₹{total_with_gst:.2f}", 
+                font=('Arial', 10, 'bold'), foreground='green', width=15).pack(side='left', padx=5)
+            
+            # Add info note
+            info_frame = ttk.Frame(self.gst_brackets_frame)
+            info_frame.pack(fill='x', pady=(10, 0))
+            ttk.Label(info_frame, 
+                text="ℹ️ GST liability to be paid to government: Red amount above. This is calculated from all sales orders.", 
+                font=('Arial', 9), foreground='#666666').pack()
+            
+        else:
+            # No sales data
+            ttk.Label(self.gst_brackets_frame, 
+                text="No sales data available yet. GST brackets will appear once orders are created.", 
+                font=('Arial', 10), foreground='gray').pack(pady=20)
+        
+        # === END GST BRACKET BREAKDOWN ===
+        
+        # Top customers with GST breakdown
+        for item in self.report_tree.get_children():
+            self.report_tree.delete(item)
+        
+        # Top customers with GST breakdown
         for item in self.report_tree.get_children():
             self.report_tree.delete(item)
         
         self.db.execute('''
-            SELECT c.name, 
+            SELECT c.customer_id,
+                c.name, 
                 COUNT(so.so_number) as order_count,
+                COALESCE(SUM(so.subtotal), 0) as total_subtotal,
+                COALESCE(SUM(so.total_gst), 0) as total_gst,
                 COALESCE(SUM(so.total_amount), 0) as total_revenue,
                 COALESCE(AVG(so.total_amount), 0) as avg_order
             FROM Customers c
@@ -1477,5 +2202,124 @@ class SalesModule:
         ''')
         
         for row in self.db.fetchall():
-            display_row = (row[0], row[1], f"₹{row[2]:.2f}", f"₹{row[3]:.2f}")
-            self.report_tree.insert('', 'end', values=display_row)
+            # Store customer_id in the item's tags for later retrieval
+            item_id = self.report_tree.insert('', 'end', values=(
+                row[1],  # Customer name
+                row[2],  # Order count
+                f"₹{row[3]:.2f}",  # Subtotal
+                f"₹{row[4]:.2f}",  # GST
+                f"₹{row[5]:.2f}",  # Total
+                f"₹{row[6]:.2f}"   # Avg
+            ))
+            # Store customer_id as a tag so we can retrieve it later
+            self.report_tree.item(item_id, tags=(str(row[0]),))
+    
+    def view_customer_order_details(self):
+        """View detailed order breakdown for a customer"""
+        selected = self.report_tree.selection()
+        if not selected:
+            messagebox.showwarning("Warning", "Select a customer to view details")
+            return
+        
+        # Get customer_id from tags
+        tags = self.report_tree.item(selected[0])['tags']
+        if not tags:
+            messagebox.showerror("Error", "Cannot retrieve customer information")
+            return
+            
+        customer_id = tags[0]
+        customer_name = self.report_tree.item(selected[0])['values'][0]
+        
+        dialog = tk.Toplevel(self.app.root)
+        dialog.title(f"Order Details - {customer_name}")
+        dialog.geometry("1100x700")
+        dialog.transient(self.app.root)
+        
+        # Wait for window to be visible before grabbing
+        dialog.update_idletasks()
+        dialog.grab_set()
+        
+        # Header
+        header_frame = ttk.Frame(dialog, padding=10)
+        header_frame.pack(fill='x')
+        
+        ttk.Label(header_frame, text=f"All Orders for: {customer_name}", 
+            font=('Arial', 14, 'bold')).pack()
+        
+        # Summary frame
+        summary_frame = ttk.LabelFrame(dialog, text="Customer Summary", padding=10)
+        summary_frame.pack(fill='x', padx=10, pady=10)
+        
+        # Get summary data
+        self.db.execute('''
+            SELECT 
+                COUNT(so.so_number) as total_orders,
+                COALESCE(SUM(so.subtotal), 0) as total_subtotal,
+                COALESCE(SUM(so.total_gst), 0) as total_gst,
+                COALESCE(SUM(so.total_amount), 0) as total_amount,
+                COALESCE(AVG(so.total_amount), 0) as avg_order
+            FROM Sales_Orders so
+            WHERE so.customer_id = ?
+        ''', (customer_id,))
+        
+        summary = self.db.fetchone()
+        
+        summary_text = f"Total Orders: {summary[0]}  |  "
+        summary_text += f"Subtotal: ₹{summary[1]:.2f}  |  "
+        summary_text += f"GST: ₹{summary[2]:.2f}  |  "
+        summary_text += f"Total: ₹{summary[3]:.2f}  |  "
+        summary_text += f"Avg Order: ₹{summary[4]:.2f}"
+        
+        ttk.Label(summary_frame, text=summary_text, font=('Arial', 10, 'bold'), 
+            foreground='blue').pack()
+        
+        # Orders list
+        orders_frame = ttk.LabelFrame(dialog, text="Individual Orders", padding=10)
+        orders_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        columns = ("SO#", "Order Date", "Status", "Items", "Subtotal", "GST", "Total")
+        tree = ttk.Treeview(orders_frame, columns=columns, show='headings', height=20)
+        
+        widths = [60, 100, 100, 60, 110, 100, 110]
+        for i, col in enumerate(columns):
+            tree.heading(col, text=col)
+            tree.column(col, width=widths[i])
+        
+        tree.pack(side='left', fill='both', expand=True)
+        
+        scrollbar = ttk.Scrollbar(orders_frame, orient='vertical', command=tree.yview)
+        scrollbar.pack(side='right', fill='y')
+        tree.configure(yscrollcommand=scrollbar.set)
+        
+        # Get all orders for this customer
+        self.db.execute('''
+            SELECT so.so_number, so.order_date, so.status,
+                (SELECT COUNT(*) FROM Sales_Order_Items WHERE so_number = so.so_number) as item_count,
+                so.subtotal, so.total_gst, so.total_amount
+            FROM Sales_Orders so
+            WHERE so.customer_id = ?
+            ORDER BY so.so_number DESC
+        ''', (customer_id,))
+        
+        for row in self.db.fetchall():
+            tree.insert('', 'end', values=(
+                row[0],  # SO#
+                row[1],  # Date
+                row[2],  # Status
+                row[3],  # Items count
+                f"₹{row[4]:.2f}",  # Subtotal
+                f"₹{row[5]:.2f}",  # GST
+                f"₹{row[6]:.2f}"   # Total
+            ))
+        
+        # Info label
+        info_frame = ttk.Frame(dialog)
+        info_frame.pack(fill='x', padx=10, pady=5)
+        
+        ttk.Label(info_frame, text="ℹ️ Subtotal = Base amount before GST  |  GST = Tax amount  |  Total = Final amount (Subtotal + GST)", 
+            font=('Arial', 9), foreground='gray').pack()
+        
+        # Close button
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(pady=10)
+        ttk.Button(btn_frame, text="✖ Close", command=dialog.destroy).pack()
