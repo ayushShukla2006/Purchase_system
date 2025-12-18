@@ -661,7 +661,7 @@ class PurchaseModule:
     def add_supplier(self):
         dialog = tk.Toplevel(self.app.root)
         dialog.title("Add Supplier")
-        dialog.geometry("500x400")
+        dialog.geometry("450x350")
         dialog.transient(self.app.root)
         dialog.grab_set()
         fields = [("Name:*", "name"), ("Contact Person:", "contact"), ("Phone:", "phone"), 
@@ -699,7 +699,7 @@ class PurchaseModule:
         data = self.db.fetchone()
         dialog = tk.Toplevel(self.app.root)
         dialog.title("Edit Supplier")
-        dialog.geometry("500x400")
+        dialog.geometry("450x350")
         dialog.transient(self.app.root)
         dialog.grab_set()
         fields = ["Name:", "Contact:", "Phone:", "Email:", "Address:", "GSTIN:", "Terms:"]
