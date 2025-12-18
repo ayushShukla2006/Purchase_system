@@ -1,5 +1,5 @@
 """
-Sales Module with GST Support (India) - Multi-item orders - ENHANCED VERSION
+Sales Module with GST Support (India)
 """
 
 import tkinter as tk
@@ -737,9 +737,8 @@ class SalesModule:
         top_frame = ttk.Frame(del_frame)
         top_frame.pack(side='top', fill='x', padx=10, pady=10)
         
-        ttk.Label(top_frame, text="Record Deliveries", font=('Arial', 14, 'bold')).pack(pady=10)
-        ttk.Button(top_frame, text="➕ New Delivery", command=self.new_delivery).pack(pady=5)
-        ttk.Button(top_frame, text="✏️ Edit Delivery", command=self.edit_delivery).pack(pady=5)
+        ttk.Button(top_frame, text="➕ New Delivery", command=self.new_delivery).pack(side = 'left',padx = 2)
+        ttk.Button(top_frame, text="✏️ Edit Delivery", command=self.edit_delivery).pack(side='left',padx = 2)
         
         history_frame = ttk.LabelFrame(del_frame, text="Delivery History", padding=10)
         history_frame.pack(fill='both', expand=True, padx=10, pady=10)

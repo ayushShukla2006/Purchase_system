@@ -1,5 +1,5 @@
 """
-Purchase Module with GST Support (India) - Multi-item orders
+Purchase Module with GST Support (India)
 """
 
 import tkinter as tk
@@ -754,8 +754,7 @@ class PurchaseModule:
         top_frame = ttk.Frame(gr_frame)
         top_frame.pack(side='top', fill='x', padx=10, pady=10)
         
-        ttk.Label(top_frame, text="Record Goods Receipt", font=('Arial', 14, 'bold')).pack(pady=10)
-        ttk.Button(top_frame, text="➕ New Receipt", command=self.new_goods_receipt).pack(pady=5)
+        ttk.Button(top_frame, text="➕ New Receipt", command=self.new_goods_receipt).pack(side = 'left',padx=2)
     
         history_frame = ttk.LabelFrame(gr_frame, text="Receipt History", padding=10)
         history_frame.pack(fill='both', expand=True, padx=10, pady=10)
@@ -776,7 +775,7 @@ class PurchaseModule:
     
         # Bind double-click to view details
         self.receipt_tree.bind('<Double-1>', lambda e: self.view_receipt_details())
-        ttk.Button(top_frame, text="✏️ Edit Receipt", command=self.edit_receipt).pack(pady=5)
+        ttk.Button(top_frame, text="✏️ Edit Receipt", command=self.edit_receipt).pack(side = 'left',padx=2)
         
         self.refresh_receipt_history()
     
