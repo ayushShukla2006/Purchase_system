@@ -102,6 +102,8 @@ inventory-management/
 │   ├── APPFINAL3.png
 │   ├── APPFINAL4.png
 │   └── APPFINAL5.png
+│   └── APPFINAL6.png
+│   └── APPFINAL7.png
 └── README.md
 ```
 
